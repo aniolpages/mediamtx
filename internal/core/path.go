@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"github.com/bluenviron/gortsplib/v5/pkg/description"
+	"github.com/google/uuid"
 
 	"github.com/bluenviron/mediamtx/internal/conf"
 	"github.com/bluenviron/mediamtx/internal/defs"
 	"github.com/bluenviron/mediamtx/internal/externalcmd"
 	"github.com/bluenviron/mediamtx/internal/hooks"
 	"github.com/bluenviron/mediamtx/internal/logger"
+	"github.com/bluenviron/mediamtx/internal/push"
 	"github.com/bluenviron/mediamtx/internal/recorder"
 	"github.com/bluenviron/mediamtx/internal/staticsources"
 	"github.com/bluenviron/mediamtx/internal/stream"
@@ -86,6 +88,7 @@ type path struct {
 	publisherQuery                 string
 	stream                         *stream.Stream
 	recorder                       *recorder.Recorder
+	pushManager                    *push.Manager
 	readyTime                      time.Time
 	onUnDemandHook                 func(string)
 	onNotReadyHook                 func()
@@ -109,9 +112,51 @@ type path struct {
 	chAddReader               chan defs.PathAddReaderReq
 	chRemoveReader            chan defs.PathRemoveReaderReq
 	chAPIPathsGet             chan pathAPIPathsGetReq
+	chAPIPushTargetsList      chan pathAPIPushTargetsListReq
+	chAPIPushTargetsGet       chan pathAPIPushTargetsGetReq
+	chAPIPushTargetsAdd       chan pathAPIPushTargetsAddReq
+	chAPIPushTargetsRemove    chan pathAPIPushTargetsRemoveReq
 
 	// out
 	done chan struct{}
+}
+
+type pathAPIPushTargetsListRes struct {
+	data *defs.APIPushTargetList
+	err  error
+}
+
+type pathAPIPushTargetsListReq struct {
+	res chan pathAPIPushTargetsListRes
+}
+
+type pathAPIPushTargetsGetRes struct {
+	data *defs.APIPushTarget
+	err  error
+}
+
+type pathAPIPushTargetsGetReq struct {
+	id  uuid.UUID
+	res chan pathAPIPushTargetsGetRes
+}
+
+type pathAPIPushTargetsAddRes struct {
+	data *defs.APIPushTarget
+	err  error
+}
+
+type pathAPIPushTargetsAddReq struct {
+	req defs.APIPushTargetAdd
+	res chan pathAPIPushTargetsAddRes
+}
+
+type pathAPIPushTargetsRemoveRes struct {
+	err error
+}
+
+type pathAPIPushTargetsRemoveReq struct {
+	id  uuid.UUID
+	res chan pathAPIPushTargetsRemoveRes
 }
 
 func (pa *path) initialize() {
@@ -133,7 +178,25 @@ func (pa *path) initialize() {
 	pa.chAddReader = make(chan defs.PathAddReaderReq)
 	pa.chRemoveReader = make(chan defs.PathRemoveReaderReq)
 	pa.chAPIPathsGet = make(chan pathAPIPathsGetReq)
+	pa.chAPIPushTargetsList = make(chan pathAPIPushTargetsListReq)
+	pa.chAPIPushTargetsGet = make(chan pathAPIPushTargetsGetReq)
+	pa.chAPIPushTargetsAdd = make(chan pathAPIPushTargetsAddReq)
+	pa.chAPIPushTargetsRemove = make(chan pathAPIPushTargetsRemoveReq)
 	pa.done = make(chan struct{})
+
+	// Initialize push manager
+	pa.pushManager = &push.Manager{
+		ReadTimeout:  pa.readTimeout,
+		WriteTimeout: pa.writeTimeout,
+		PathName:     pa.name,
+		Parent:       pa,
+	}
+	pa.pushManager.Initialize()
+
+	// Add static push targets from config
+	for _, pt := range pa.conf.PushTargets {
+		pa.pushManager.AddTarget(pt.URL)
+	}
 
 	pa.Log(logger.Debug, "created")
 
@@ -219,6 +282,11 @@ func (pa *path) run() {
 
 	if pa.stream != nil {
 		pa.setNotReady()
+	}
+
+	if pa.pushManager != nil {
+		pa.pushManager.Close()
+		pa.pushManager = nil
 	}
 
 	if pa.source != nil {
@@ -307,6 +375,18 @@ func (pa *path) runInner() error {
 
 		case req := <-pa.chAPIPathsGet:
 			pa.doAPIPathsGet(req)
+
+		case req := <-pa.chAPIPushTargetsList:
+			pa.doAPIPushTargetsList(req)
+
+		case req := <-pa.chAPIPushTargetsGet:
+			pa.doAPIPushTargetsGet(req)
+
+		case req := <-pa.chAPIPushTargetsAdd:
+			pa.doAPIPushTargetsAdd(req)
+
+		case req := <-pa.chAPIPushTargetsRemove:
+			pa.doAPIPushTargetsRemove(req)
 
 		case <-pa.ctx.Done():
 			return fmt.Errorf("terminated")
@@ -594,6 +674,83 @@ func (pa *path) doAPIPathsGet(req pathAPIPathsGetReq) {
 	}
 }
 
+func (pa *path) doAPIPushTargetsList(req pathAPIPushTargetsListReq) {
+	if pa.pushManager == nil {
+		req.res <- pathAPIPushTargetsListRes{data: &defs.APIPushTargetList{Items: []*defs.APIPushTarget{}}}
+		return
+	}
+	req.res <- pathAPIPushTargetsListRes{data: pa.pushManager.APIItem()}
+}
+
+func (pa *path) doAPIPushTargetsGet(req pathAPIPushTargetsGetReq) {
+	if pa.pushManager == nil {
+		req.res <- pathAPIPushTargetsGetRes{err: fmt.Errorf("push target not found")}
+		return
+	}
+	target, err := pa.pushManager.GetTarget(req.id)
+	if err != nil {
+		req.res <- pathAPIPushTargetsGetRes{err: fmt.Errorf("push target not found")}
+		return
+	}
+	req.res <- pathAPIPushTargetsGetRes{data: target.APIItem()}
+}
+
+func (pa *path) doAPIPushTargetsAdd(req pathAPIPushTargetsAddReq) {
+	if pa.pushManager == nil {
+		pa.pushManager = &push.Manager{
+			ReadTimeout:  pa.readTimeout,
+			WriteTimeout: pa.writeTimeout,
+			PathName:     pa.name,
+			Parent:       pa,
+		}
+		pa.pushManager.Initialize()
+		if pa.stream != nil {
+			pa.pushManager.SetStream(pa.stream)
+		}
+	}
+	target := pa.pushManager.AddTarget(req.req.URL)
+	
+	// Also add to path configuration so it persists through reloads
+	pa.confMutex.Lock()
+	pa.conf.PushTargets = append(pa.conf.PushTargets, conf.PushTarget{URL: req.req.URL})
+	pa.confMutex.Unlock()
+	
+	req.res <- pathAPIPushTargetsAddRes{data: target.APIItem()}
+}
+
+func (pa *path) doAPIPushTargetsRemove(req pathAPIPushTargetsRemoveReq) {
+	if pa.pushManager == nil {
+		req.res <- pathAPIPushTargetsRemoveRes{err: fmt.Errorf("push target not found")}
+		return
+	}
+	
+	// Get the target URL before removing so we can remove from config
+	target, err := pa.pushManager.GetTarget(req.id)
+	if err != nil {
+		req.res <- pathAPIPushTargetsRemoveRes{err: err}
+		return
+	}
+	targetURL := target.URL
+	
+	err = pa.pushManager.RemoveTarget(req.id)
+	if err != nil {
+		req.res <- pathAPIPushTargetsRemoveRes{err: err}
+		return
+	}
+	
+	// Also remove from path configuration so it persists through reloads
+	pa.confMutex.Lock()
+	for i, pt := range pa.conf.PushTargets {
+		if pt.URL == targetURL {
+			pa.conf.PushTargets = append(pa.conf.PushTargets[:i], pa.conf.PushTargets[i+1:]...)
+			break
+		}
+	}
+	pa.confMutex.Unlock()
+	
+	req.res <- pathAPIPushTargetsRemoveRes{}
+}
+
 func (pa *path) SafeConf() *conf.Path {
 	pa.confMutex.RLock()
 	defer pa.confMutex.RUnlock()
@@ -706,6 +863,11 @@ func (pa *path) setReady(desc *description.Session, generateRTPPackets bool, fil
 		pa.startRecording()
 	}
 
+	// Initialize push manager and start pushing to configured targets
+	if pa.pushManager != nil {
+		pa.pushManager.SetStream(pa.stream)
+	}
+
 	pa.onNotReadyHook = hooks.OnReady(hooks.OnReadyParams{
 		Logger:          pa,
 		ExternalCmdPool: pa.externalCmdPool,
@@ -747,6 +909,11 @@ func (pa *path) setNotReady() {
 	if pa.recorder != nil {
 		pa.recorder.Close()
 		pa.recorder = nil
+	}
+
+	// Stop pushing to external targets
+	if pa.pushManager != nil {
+		pa.pushManager.ClearStream()
 	}
 
 	if pa.stream != nil {
@@ -949,5 +1116,53 @@ func (pa *path) APIPathsGet(req pathAPIPathsGetReq) (*defs.APIPath, error) {
 
 	case <-pa.ctx.Done():
 		return nil, fmt.Errorf("terminated")
+	}
+}
+
+// APIPushTargetsList is called by api.
+func (pa *path) APIPushTargetsList() (*defs.APIPushTargetList, error) {
+	req := pathAPIPushTargetsListReq{res: make(chan pathAPIPushTargetsListRes)}
+	select {
+	case pa.chAPIPushTargetsList <- req:
+		res := <-req.res
+		return res.data, res.err
+	case <-pa.ctx.Done():
+		return nil, fmt.Errorf("terminated")
+	}
+}
+
+// APIPushTargetsGet is called by api.
+func (pa *path) APIPushTargetsGet(id uuid.UUID) (*defs.APIPushTarget, error) {
+	req := pathAPIPushTargetsGetReq{id: id, res: make(chan pathAPIPushTargetsGetRes)}
+	select {
+	case pa.chAPIPushTargetsGet <- req:
+		res := <-req.res
+		return res.data, res.err
+	case <-pa.ctx.Done():
+		return nil, fmt.Errorf("terminated")
+	}
+}
+
+// APIPushTargetsAdd is called by api.
+func (pa *path) APIPushTargetsAdd(add defs.APIPushTargetAdd) (*defs.APIPushTarget, error) {
+	req := pathAPIPushTargetsAddReq{req: add, res: make(chan pathAPIPushTargetsAddRes)}
+	select {
+	case pa.chAPIPushTargetsAdd <- req:
+		res := <-req.res
+		return res.data, res.err
+	case <-pa.ctx.Done():
+		return nil, fmt.Errorf("terminated")
+	}
+}
+
+// APIPushTargetsRemove is called by api.
+func (pa *path) APIPushTargetsRemove(id uuid.UUID) error {
+	req := pathAPIPushTargetsRemoveReq{id: id, res: make(chan pathAPIPushTargetsRemoveRes)}
+	select {
+	case pa.chAPIPushTargetsRemove <- req:
+		res := <-req.res
+		return res.err
+	case <-pa.ctx.Done():
+		return fmt.Errorf("terminated")
 	}
 }
