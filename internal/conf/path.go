@@ -248,6 +248,9 @@ type Path struct {
 	RPICameraSecondaryFPS          float64   `json:"-"` // filled by Validate()
 	RPICameraSecondaryMJPEGQuality uint      `json:"-"` // filled by Validate()
 
+	// Push
+	PushTargets PushTargets `json:"pushTargets"`
+
 	// Hooks
 	RunOnInit                  string   `json:"runOnInit"`
 	RunOnInitRestart           bool     `json:"runOnInitRestart"`
@@ -801,6 +804,12 @@ func (pconf *Path) validate(
 				}},
 			})
 		}()
+	}
+
+	// Push
+
+	if err := pconf.PushTargets.Validate(); err != nil {
+		return err
 	}
 
 	// Hooks
