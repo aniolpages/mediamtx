@@ -228,6 +228,7 @@ func (t *Target) runRTMP() error {
 
 	// Resolve the URL with path variables
 	targetURL := t.resolveURL()
+	t.Log(logger.Debug, "resolved URL: %s", targetURL)
 
 	u, err := url.Parse(targetURL)
 	if err != nil {
@@ -243,6 +244,8 @@ func (t *Target) runRTMP() error {
 			u.Host = net.JoinHostPort(u.Host, "1936")
 		}
 	}
+
+	t.Log(logger.Debug, "connecting to host: %s", u.Host)
 
 	t.mutex.RLock()
 	strm := t.stream
@@ -420,7 +423,10 @@ func (t *Target) runRTMP() error {
 		return fmt.Errorf("no supported tracks found for RTMP push")
 	}
 
+	t.Log(logger.Debug, "found %d tracks for RTMP push", len(tracks))
+
 	// Connect to RTMP server
+	t.Log(logger.Debug, "initializing RTMP client connection to %s", u.String())
 	connectCtx, connectCtxCancel := context.WithTimeout(t.ctx, time.Duration(t.ReadTimeout))
 	conn := &gortmplib.Client{
 		URL:       u,
@@ -430,6 +436,7 @@ func (t *Target) runRTMP() error {
 	err = conn.Initialize(connectCtx)
 	connectCtxCancel()
 	if err != nil {
+		t.Log(logger.Debug, "RTMP client initialization failed: %v", err)
 		return err
 	}
 
