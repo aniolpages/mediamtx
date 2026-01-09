@@ -703,6 +703,7 @@ func (p *Core) createResources(initial bool) error {
 			return err
 		}
 		p.api = i
+		i.SetConfigPath(p.confPath)
 	}
 
 	if initial && p.confPath != "" {

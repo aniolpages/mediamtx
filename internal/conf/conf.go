@@ -178,14 +178,15 @@ type Conf struct {
 	AuthJWTInHTTPQuery        bool                        `json:"authJWTInHTTPQuery"`
 
 	// Control API
-	API               bool           `json:"api"`
-	APIAddress        string         `json:"apiAddress"`
-	APIEncryption     bool           `json:"apiEncryption"`
-	APIServerKey      string         `json:"apiServerKey"`
-	APIServerCert     string         `json:"apiServerCert"`
-	APIAllowOrigin    *string        `json:"apiAllowOrigin,omitempty"` // deprecated
-	APIAllowOrigins   AllowedOrigins `json:"apiAllowOrigins"`
-	APITrustedProxies IPNetworks     `json:"apiTrustedProxies"`
+	API                 bool           `json:"api"`
+	APIAddress          string         `json:"apiAddress"`
+	APIEncryption       bool           `json:"apiEncryption"`
+	APIServerKey        string         `json:"apiServerKey"`
+	APIServerCert       string         `json:"apiServerCert"`
+	APIAllowOrigin      *string        `json:"apiAllowOrigin,omitempty"` // deprecated
+	APIAllowOrigins     AllowedOrigins `json:"apiAllowOrigins"`
+	APITrustedProxies   IPNetworks     `json:"apiTrustedProxies"`
+	APIPersistChanges   bool           `json:"apiPersistChanges"`
 
 	// Metrics
 	Metrics               bool           `json:"metrics"`
@@ -349,6 +350,7 @@ func (conf *Conf) setDefaults() {
 	conf.APIServerKey = "server.key"
 	conf.APIServerCert = "server.crt"
 	conf.APIAllowOrigins = []string{"*"}
+	conf.APIPersistChanges = false
 
 	// Metrics
 	conf.MetricsAddress = ":9998"

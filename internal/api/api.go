@@ -99,6 +99,7 @@ type API struct {
 	SRTServer      defs.APISRTServer
 	Parent         apiParent
 
+	configPath string
 	httpServer *httpp.Server
 	mutex      sync.RWMutex
 }
@@ -288,4 +289,31 @@ func (a *API) ReloadConf(conf *conf.Conf) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	a.Conf = conf
+}
+
+// SetConfigPath sets the configuration file path for persistence.
+func (a *API) SetConfigPath(path string) {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	a.configPath = path
+}
+
+// persistConfig saves the current configuration to the YAML file if persistence is enabled.
+func (a *API) persistConfig() error {
+	if !a.Conf.APIPersistChanges {
+		return nil // Persistence is disabled
+	}
+
+	if a.configPath == "" {
+		return nil // No config path set, skip persistence
+	}
+
+	err := a.Conf.SaveToFile(a.configPath)
+	if err != nil {
+		a.Log(logger.Warn, "failed to persist config changes: %v", err)
+		return err
+	}
+
+	a.Log(logger.Info, "configuration persisted to %s", a.configPath)
+	return nil
 }

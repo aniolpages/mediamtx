@@ -88,7 +88,8 @@ func (a *API) onConfigPathsAdd(ctx *gin.Context) { //nolint:dupl
 
 	a.Conf = newConf
 	a.Parent.APIConfigSet(newConf)
-
+	// Persist changes to YAML if enabled
+	go a.persistConfig()
 	a.writeOK(ctx)
 }
 
@@ -130,6 +131,9 @@ func (a *API) onConfigPathsPatch(ctx *gin.Context) { //nolint:dupl
 	a.Conf = newConf
 	a.Parent.APIConfigSet(newConf)
 
+	// Persist changes to YAML if enabled
+	go a.persistConfig()
+
 	a.writeOK(ctx)
 }
 
@@ -170,6 +174,9 @@ func (a *API) onConfigPathsReplace(ctx *gin.Context) { //nolint:dupl
 
 	a.Conf = newConf
 	a.Parent.APIConfigSet(newConf)
+
+	// Persist changes to YAML if enabled
+	go a.persistConfig()
 
 	a.writeOK(ctx)
 }
