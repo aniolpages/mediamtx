@@ -103,6 +103,9 @@ func (a *API) onPushTargetsAdd(ctx *gin.Context) {
 		}
 		return
 	}
+// Update configuration and persist if enabled
+a.syncPathConfigFromRuntime(pathName)
+
 
 	ctx.JSON(http.StatusOK, data)
 }
@@ -137,6 +140,9 @@ func (a *API) onPushTargetsRemove(ctx *gin.Context) {
 		}
 		return
 	}
+// Update configuration and persist if enabled
+a.syncPathConfigFromRuntime(pathName)
+
 
 	ctx.JSON(http.StatusOK, gin.H{})
 }
