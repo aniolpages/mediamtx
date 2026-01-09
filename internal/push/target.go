@@ -733,8 +733,6 @@ func (t *Target) runRTMP() error {
 						for _, nalu := range u.Payload.(unit.PayloadH264) {
 							totalSize += len(nalu)
 						}
-						t.Log(logger.Debug, "writing H264: pts=%d, dts=%d, nalus=%d, size=%d bytes",
-							u.PTS, dts, len(u.Payload.(unit.PayloadH264)), totalSize)
 
 						err = writer.WriteH264(
 							track,
@@ -769,8 +767,6 @@ func (t *Target) runRTMP() error {
 
 						for i, au := range u.Payload.(unit.PayloadMPEG4Audio) {
 							pts := u.PTS + int64(i)*1024 // SamplesPerAccessUnit
-
-							t.Log(logger.Debug, "writing MPEG4Audio: pts=%d, size=%d bytes", pts, len(au))
 
 							err := writer.WriteMPEG4Audio(
 								track,
