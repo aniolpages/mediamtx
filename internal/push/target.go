@@ -868,20 +868,6 @@ func (t *Target) runRTMP() error {
 		}
 	}()
 
-	// Start a goroutine to log bytes sent periodically
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				t.Log(logger.Debug, "bytes sent to %s: %d", u.Host, conn.BytesSent())
-			case <-t.ctx.Done():
-				return
-			}
-		}
-	}()
-
 	// Wait for error or context cancellation
 	select {
 	case err := <-reader.Error():
