@@ -729,19 +729,25 @@ func (t *Target) runRTMP() error {
 							return err
 						}
 
+						totalSize := 0
+						for _, nalu := range u.Payload.(unit.PayloadH264) {
+							totalSize += len(nalu)
+						}
+						t.Log(logger.Debug, "writing H264: pts=%d, dts=%d, nalus=%d, size=%d bytes",
+							u.PTS, dts, len(u.Payload.(unit.PayloadH264)), totalSize)
+
 						err = writer.WriteH264(
 							track,
 							timestampToDuration(u.PTS, forma.ClockRate()),
 							timestampToDuration(dts, forma.ClockRate()),
 							u.Payload.(unit.PayloadH264))
 						if err != nil {
+							t.Log(logger.Error, "WriteH264 error: %v", err)
 							return err
 						}
 
 						// Count bytes sent (approximate size of payload)
-						for _, nalu := range u.Payload.(unit.PayloadH264) {
-							t.addBytesSent(uint64(len(nalu)))
-						}
+						t.addBytesSent(uint64(totalSize))
 						return nil
 					})
 
@@ -764,12 +770,15 @@ func (t *Target) runRTMP() error {
 						for i, au := range u.Payload.(unit.PayloadMPEG4Audio) {
 							pts := u.PTS + int64(i)*1024 // SamplesPerAccessUnit
 
+							t.Log(logger.Debug, "writing MPEG4Audio: pts=%d, size=%d bytes", pts, len(au))
+
 							err := writer.WriteMPEG4Audio(
 								track,
 								timestampToDuration(pts, forma.ClockRate()),
 								au,
 							)
 							if err != nil {
+								t.Log(logger.Error, "WriteMPEG4Audio error: %v", err)
 								return err
 							}
 
@@ -840,6 +849,25 @@ func (t *Target) runRTMP() error {
 
 	t.Log(logger.Debug, "streaming to %s", targetURL)
 
+	// Channel to signal errors from background goroutines
+	rtmpErr := make(chan error, 1)
+
+	// Start a goroutine to read incoming RTMP messages (handles acks, pings, etc.)
+	go func() {
+		for {
+			msg, err := conn.Read()
+			if err != nil {
+				select {
+				case rtmpErr <- fmt.Errorf("RTMP read error: %w", err):
+				default:
+				}
+				return
+			}
+			// Log the message type for debugging
+			t.Log(logger.Debug, "received RTMP message: %T", msg)
+		}
+	}()
+
 	// Start a goroutine to log bytes sent periodically
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
@@ -857,6 +885,8 @@ func (t *Target) runRTMP() error {
 	// Wait for error or context cancellation
 	select {
 	case err := <-reader.Error():
+		return err
+	case err := <-rtmpErr:
 		return err
 	case <-t.ctx.Done():
 		return nil
