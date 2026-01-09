@@ -812,10 +812,6 @@ func (t *Target) runRTMP() error {
 
 	defer conn.Close()
 
-	// Set read/write deadlines for the connection
-	conn.NetConn().SetReadDeadline(time.Now().Add(time.Duration(t.ReadTimeout)))
-	conn.NetConn().SetWriteDeadline(time.Now().Add(time.Duration(t.WriteTimeout)))
-
 	t.Log(logger.Info, "connected to %s", targetURL)
 
 	// Initialize writer
@@ -825,8 +821,10 @@ func (t *Target) runRTMP() error {
 	}
 	err = writer.Initialize()
 	if err != nil {
+		t.Log(logger.Error, "writer initialization failed: %v", err)
 		return err
 	}
+	t.Log(logger.Debug, "writer initialized successfully")
 
 	// Add reader to stream
 	strm.AddReader(reader)
@@ -836,8 +834,25 @@ func (t *Target) runRTMP() error {
 	t.reader = reader
 	t.mutex.Unlock()
 
-	// Clear write deadline for long-running streaming
+	// Clear deadlines for long-running streaming
+	conn.NetConn().SetReadDeadline(time.Time{})
 	conn.NetConn().SetWriteDeadline(time.Time{})
+
+	t.Log(logger.Debug, "streaming to %s", targetURL)
+
+	// Start a goroutine to log bytes sent periodically
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				t.Log(logger.Debug, "bytes sent to %s: %d", u.Host, conn.BytesSent())
+			case <-t.ctx.Done():
+				return
+			}
+		}
+	}()
 
 	// Wait for error or context cancellation
 	select {
