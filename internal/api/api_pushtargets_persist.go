@@ -53,10 +53,16 @@ func (a *API) syncPathConfigFromRuntime(pathName string) {
 			},
 		}
 
-		// Patch or create the path in OptionalPaths
-		if err := newConf.PatchPath(pathName, optPath); err != nil {
-			a.Log(logger.Warn, "failed to patch path config with push targets: %v", err)
-			return
+		// Check if path already exists in config
+		if _, exists := newConf.OptionalPaths[pathName]; exists {
+			// Path exists - patch it
+			if err := newConf.PatchPath(pathName, optPath); err != nil {
+				a.Log(logger.Warn, "failed to patch path config with push targets: %v", err)
+				return
+			}
+		} else {
+			// Path doesn't exist - create it directly
+			newConf.OptionalPaths[pathName] = optPath
 		}
 
 		a.Conf = newConf
