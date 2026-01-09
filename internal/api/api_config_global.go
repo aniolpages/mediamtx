@@ -43,5 +43,8 @@ func (a *API) onConfigGlobalPatch(ctx *gin.Context) {
 	// call it in a goroutine
 	go a.Parent.APIConfigSet(newConf)
 
+	// Persist changes to YAML if enabled
+	go a.persistConfig()
+
 	a.writeOK(ctx)
 }

@@ -40,5 +40,8 @@ func (a *API) onConfigPathDefaultsPatch(ctx *gin.Context) {
 	a.Conf = newConf
 	a.Parent.APIConfigSet(newConf)
 
+	// Persist changes to YAML if enabled
+	go a.persistConfig()
+
 	a.writeOK(ctx)
 }
