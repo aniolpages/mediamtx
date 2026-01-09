@@ -425,9 +425,20 @@ func (t *Target) runRTMP() error {
 
 	t.Log(logger.Debug, "found %d tracks for RTMP push", len(tracks))
 
+	// First, test raw TCP connectivity
+	t.Log(logger.Debug, "testing raw TCP connection to %s", u.Host)
+	testConn, err := net.DialTimeout("tcp", u.Host, 10*time.Second)
+	if err != nil {
+		t.Log(logger.Debug, "raw TCP connection failed: %v", err)
+		return fmt.Errorf("TCP connection failed: %w", err)
+	}
+	t.Log(logger.Debug, "raw TCP connection successful, closing test connection")
+	testConn.Close()
+
 	// Connect to RTMP server
 	t.Log(logger.Debug, "initializing RTMP client connection to %s", u.String())
-	connectCtx, connectCtxCancel := context.WithTimeout(t.ctx, time.Duration(t.ReadTimeout))
+	// Use a longer timeout for YouTube - 30 seconds
+	connectCtx, connectCtxCancel := context.WithTimeout(t.ctx, 30*time.Second)
 	conn := &gortmplib.Client{
 		URL:       u,
 		TLSConfig: tls.MakeConfig(u.Hostname(), ""),
