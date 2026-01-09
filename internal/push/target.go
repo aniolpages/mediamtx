@@ -435,6 +435,10 @@ func (t *Target) runRTMP() error {
 
 	defer conn.Close()
 
+	// Set read/write deadlines for the connection
+	conn.NetConn().SetReadDeadline(time.Now().Add(time.Duration(t.ReadTimeout)))
+	conn.NetConn().SetWriteDeadline(time.Now().Add(time.Duration(t.WriteTimeout)))
+
 	t.Log(logger.Info, "connected to %s", targetURL)
 
 	// Initialize writer
@@ -454,6 +458,9 @@ func (t *Target) runRTMP() error {
 	t.mutex.Lock()
 	t.reader = reader
 	t.mutex.Unlock()
+
+	// Clear write deadline for long-running streaming
+	conn.NetConn().SetWriteDeadline(time.Time{})
 
 	// Wait for error or context cancellation
 	select {
