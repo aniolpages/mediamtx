@@ -119,6 +119,16 @@ func FromStream(
 								return nil
 							}
 
+							// Check for SPS/VPS which indicates a source change
+							// (e.g., transition between online and offline in alwaysAvailable mode)
+							for _, nalu := range u.Payload.(unit.PayloadH265) {
+								typ := h265.NALUType((nalu[0] >> 1) & 0b111111)
+								if typ == h265.NALUType_SPS_NUT || typ == h265.NALUType_VPS_NUT {
+									videoDTSExtractor = nil
+									break
+								}
+							}
+
 							if videoDTSExtractor == nil {
 								if !h265.IsRandomAccess(u.Payload.(unit.PayloadH265)) {
 									return nil
@@ -152,6 +162,7 @@ func FromStream(
 				tracks = append(tracks, track)
 
 				var videoDTSExtractor *h264.DTSExtractor
+				var lastPTS int64
 
 				r.OnData(
 					media,
@@ -174,6 +185,17 @@ func FromStream(
 								nonIDRPresent = true
 							}
 						}
+
+						// Detect large PTS jump which indicates source change
+						if videoDTSExtractor != nil && lastPTS != 0 {
+							ptsDiff := u.PTS - lastPTS
+							// If PTS jumps more than 5 seconds or goes backwards significantly, reset
+							if ptsDiff > 450000 || ptsDiff < -90000 { // 5s forward or 1s backward at 90kHz
+								videoDTSExtractor = nil
+							}
+						}
+
+						lastPTS = u.PTS
 
 						// wait until we receive an IDR
 						if videoDTSExtractor == nil {

@@ -375,6 +375,9 @@ func (f *formatFMP4) initialize() bool {
 
 						if paramsChanged {
 							f.updateCodecParams()
+							// Reset DTSExtractor when params change - this indicates a source change
+							// (e.g., transition between online and offline in alwaysAvailable mode)
+							dtsExtractor = nil
 						}
 
 						if dtsExtractor == nil {
@@ -451,6 +454,9 @@ func (f *formatFMP4) initialize() bool {
 
 						if paramsChanged {
 							f.updateCodecParams()
+							// Reset DTSExtractor when params change - this indicates a source change
+							// (e.g., transition between online and offline in alwaysAvailable mode)
+							dtsExtractor = nil
 						}
 
 						if dtsExtractor == nil {

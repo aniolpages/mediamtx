@@ -35,6 +35,9 @@ func (o *offlineSubStream) initialize() error {
 
 	o.ctx, o.ctxCancel = context.WithCancel(context.Background())
 
+	// Use a shared start time for all tracks to ensure synchronization
+	sharedStartTime := time.Now()
+
 	pos := 0
 	o.tracks = make([]*offlineSubStreamTrack, len(o.subStream.CurDesc.Medias))
 
@@ -48,6 +51,7 @@ func (o *offlineSubStream) initialize() error {
 				subStream: o.subStream,
 				media:     media,
 				format:    forma,
+				startTime: sharedStartTime,
 			}
 			t.initialize()
 			o.tracks[pos] = t

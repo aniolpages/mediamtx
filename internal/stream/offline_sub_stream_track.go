@@ -40,6 +40,7 @@ type offlineSubStreamTrack struct {
 	media          *description.Media
 	format         format.Format
 	waitLastSample bool
+	startTime      time.Time // Shared start time for A/V sync
 }
 
 func (t *offlineSubStreamTrack) initialize() {
@@ -51,7 +52,6 @@ func (t *offlineSubStreamTrack) run() {
 	defer t.wg.Done()
 
 	var pts int64
-	systemTime := time.Now()
 
 	if t.file != "" {
 		f, err := os.Open(t.file)
@@ -60,7 +60,7 @@ func (t *offlineSubStreamTrack) run() {
 		}
 		defer f.Close()
 
-		err = t.runFile(pts, systemTime, f, t.pos)
+		err = t.runFile(pts, f, t.pos)
 		if err != nil {
 			panic(err)
 		}
@@ -68,6 +68,9 @@ func (t *offlineSubStreamTrack) run() {
 	}
 
 	const audioWritesPerSecond = 10
+
+	// Use shared start time for embedded audio/video (for A/V sync)
+	var elapsedTime time.Duration
 
 	switch forma := t.format.(type) {
 	case *format.Opus:
@@ -88,9 +91,9 @@ func (t *offlineSubStreamTrack) run() {
 			})
 
 			pts += writeDuration
-			systemTime = systemTime.Add(writeDurationGo)
+			elapsedTime += writeDurationGo
 
-			if !t.sleep(systemTime) {
+			if !t.sleep(t.startTime.Add(elapsedTime)) {
 				return
 			}
 		}
@@ -122,9 +125,9 @@ func (t *offlineSubStreamTrack) run() {
 			})
 
 			pts += writeDuration
-			systemTime = systemTime.Add(writeDurationGo)
+			elapsedTime += writeDurationGo
 
-			if !t.sleep(systemTime) {
+			if !t.sleep(t.startTime.Add(elapsedTime)) {
 				return
 			}
 		}
@@ -154,9 +157,9 @@ func (t *offlineSubStreamTrack) run() {
 			})
 
 			pts += int64(writeDuration)
-			systemTime = systemTime.Add(writeDurationGo)
+			elapsedTime += writeDurationGo
 
-			if !t.sleep(systemTime) {
+			if !t.sleep(t.startTime.Add(elapsedTime)) {
 				return
 			}
 		}
@@ -176,9 +179,9 @@ func (t *offlineSubStreamTrack) run() {
 			})
 
 			pts += int64(writeDuration)
-			systemTime = systemTime.Add(writeDurationGo)
+			elapsedTime += writeDurationGo
 
-			if !t.sleep(systemTime) {
+			if !t.sleep(t.startTime.Add(elapsedTime)) {
 				return
 			}
 		}
@@ -205,14 +208,14 @@ func (t *offlineSubStreamTrack) run() {
 
 		r := bytes.NewReader(buf)
 
-		err := t.runFile(pts, systemTime, r, 0)
+		err := t.runFile(pts, r, 0)
 		if err != nil {
 			panic(err)
 		}
 	}
 }
 
-func (t *offlineSubStreamTrack) runFile(pts int64, systemTime time.Time, r io.ReadSeeker, pos int) error {
+func (t *offlineSubStreamTrack) runFile(pts int64, r io.ReadSeeker, pos int) error {
 	var presentation pmp4.Presentation
 	err := presentation.Unmarshal(r)
 	if err != nil {
@@ -221,37 +224,33 @@ func (t *offlineSubStreamTrack) runFile(pts int64, systemTime time.Time, r io.Re
 
 	track := presentation.Tracks[pos]
 
+	// Start DTS from 0. Both audio and video will start sending at the same time
+	// because they share the same startTime.
+	dts := pts
+
+	// Use the shared start time for A/V synchronization
+	var elapsedSamples int64 // Total sample time elapsed in track timescale units
+
 	for {
-		// in case of the embedded video, codec parameters are not in the description
-		// and must be sent manually
-		if t.file == "" {
-			switch codec := track.Codec.(type) {
-			case *mcodecs.H265:
-				if codec.SPS != nil && codec.PPS != nil && codec.VPS != nil {
-					t.subStream.WriteUnit(t.media, t.format, &unit.Unit{
-						PTS:     pts,
-						NTP:     time.Time{},
-						Payload: unit.PayloadH265([][]byte{codec.SPS, codec.PPS, codec.VPS}),
-					})
-				}
-
-			case *mcodecs.H264:
-				if codec.SPS != nil && codec.PPS != nil {
-					t.subStream.WriteUnit(t.media, t.format, &unit.Unit{
-						PTS:     pts,
-						NTP:     time.Time{},
-						Payload: unit.PayloadH264([][]byte{codec.SPS, codec.PPS}),
-					})
-				}
-			}
-		}
-
 		for _, sample := range track.Samples {
 			var payload []byte
 			payload, err = sample.GetPayload()
 			if err != nil {
 				return err
 			}
+
+			// Convert PTSOffset from track timescale to codec clock rate
+			ptsOffsetInClockRate := multiplyAndDivide(int64(sample.PTSOffset),
+				int64(t.format.ClockRate()), int64(track.TimeScale))
+
+			// PTS = DTS + PTSOffset
+			// For H.264/H.265 with B-frames, this preserves the proper relationship
+			// between DTS and PTS that DTSExtractor expects. The first IDR will have
+			// PTS = PTSOffset (not 0), which is correct for B-frame reordering.
+			// Note: This may cause a small A/V desync (video appears ~66ms after audio
+			// for typical 2-frame B-delay), but this is necessary for DTSExtractor
+			// to compute valid DTS values.
+			samplePTS := dts + ptsOffsetInClockRate
 
 			switch track.Codec.(type) {
 			case *mcodecs.AV1:
@@ -262,14 +261,14 @@ func (t *offlineSubStreamTrack) runFile(pts int64, systemTime time.Time, r io.Re
 				}
 
 				t.subStream.WriteUnit(t.media, t.format, &unit.Unit{
-					PTS:     pts,
+					PTS:     samplePTS,
 					NTP:     time.Time{},
 					Payload: unit.PayloadAV1(bs),
 				})
 
 			case *mcodecs.VP9:
 				t.subStream.WriteUnit(t.media, t.format, &unit.Unit{
-					PTS:     pts,
+					PTS:     samplePTS,
 					NTP:     time.Time{},
 					Payload: unit.PayloadVP9(payload),
 				})
@@ -282,7 +281,7 @@ func (t *offlineSubStreamTrack) runFile(pts int64, systemTime time.Time, r io.Re
 				}
 
 				t.subStream.WriteUnit(t.media, t.format, &unit.Unit{
-					PTS:     pts,
+					PTS:     samplePTS,
 					NTP:     time.Time{},
 					Payload: unit.PayloadH265(avcc),
 				})
@@ -295,19 +294,49 @@ func (t *offlineSubStreamTrack) runFile(pts int64, systemTime time.Time, r io.Re
 				}
 
 				t.subStream.WriteUnit(t.media, t.format, &unit.Unit{
-					PTS:     pts,
+					PTS:     samplePTS,
 					NTP:     time.Time{},
 					Payload: unit.PayloadH264(avcc),
 				})
+
+			case *mcodecs.MPEG4Audio:
+				t.subStream.WriteUnit(t.media, t.format, &unit.Unit{
+					PTS:     samplePTS,
+					NTP:     time.Time{},
+					Payload: unit.PayloadMPEG4Audio([][]byte{payload}),
+				})
+
+			case *mcodecs.Opus:
+				t.subStream.WriteUnit(t.media, t.format, &unit.Unit{
+					PTS:     samplePTS,
+					NTP:     time.Time{},
+					Payload: unit.PayloadOpus([][]byte{payload}),
+				})
+
+			case *mcodecs.LPCM:
+				t.subStream.WriteUnit(t.media, t.format, &unit.Unit{
+					PTS:     samplePTS,
+					NTP:     time.Time{},
+					Payload: unit.PayloadLPCM(payload),
+				})
 			}
 
-			pts += multiplyAndDivide(int64(sample.Duration)+int64(sample.PTSOffset),
+			// DTS increments by sample duration (not affected by PTSOffset)
+			dtsDelta := multiplyAndDivide(int64(sample.Duration),
 				int64(t.format.ClockRate()), int64(track.TimeScale))
-			durationGo := multiplyAndDivide2(time.Duration(int64(sample.Duration)+int64(sample.PTSOffset)),
-				time.Second, time.Duration(track.TimeScale))
-			systemTime = systemTime.Add(durationGo)
+			dts += dtsDelta
 
-			if !t.sleep(systemTime) {
+			// Track elapsed time based on DTS (decode time)
+			elapsedSamples += int64(sample.Duration)
+
+			// Sleep based on DTS (decode time), not PTS
+			// This ensures frames are sent in decode order at the right pace
+			// The receiver will handle reordering based on PTS
+			elapsedDuration := multiplyAndDivide2(time.Duration(elapsedSamples),
+				time.Second, time.Duration(track.TimeScale))
+			targetTime := t.startTime.Add(elapsedDuration)
+
+			if !t.sleep(targetTime) {
 				return nil
 			}
 		}
