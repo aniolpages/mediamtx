@@ -13,6 +13,7 @@ import (
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/bluenviron/mediacommon/v2/pkg/codecs/av1"
 	"github.com/bluenviron/mediacommon/v2/pkg/codecs/h264"
+	"github.com/bluenviron/mediacommon/v2/pkg/codecs/h265"
 	"github.com/bluenviron/mediacommon/v2/pkg/codecs/mpeg4audio"
 	mcodecs "github.com/bluenviron/mediacommon/v2/pkg/formats/mp4/codecs"
 	"github.com/bluenviron/mediacommon/v2/pkg/formats/pmp4"
@@ -280,6 +281,18 @@ func (t *offlineSubStreamTrack) runFile(pts int64, r io.ReadSeeker, pos int) err
 					return err
 				}
 
+				// Prepend VPS/SPS/PPS to IDR frames to signal source change to downstream handlers
+				// (e.g., when transitioning from online to offline in alwaysAvailable mode)
+				h265Codec := track.Codec.(*mcodecs.H265)
+				for _, nalu := range avcc {
+					typ := h265.NALUType((nalu[0] >> 1) & 0b111111)
+					if typ == h265.NALUType_IDR_W_RADL || typ == h265.NALUType_IDR_N_LP || typ == h265.NALUType_CRA_NUT {
+						// Prepend VPS, SPS and PPS before the IDR
+						avcc = append([][]byte{h265Codec.VPS, h265Codec.SPS, h265Codec.PPS}, avcc...)
+						break
+					}
+				}
+
 				t.subStream.WriteUnit(t.media, t.format, &unit.Unit{
 					PTS:     samplePTS,
 					NTP:     time.Time{},
@@ -291,6 +304,17 @@ func (t *offlineSubStreamTrack) runFile(pts int64, r io.ReadSeeker, pos int) err
 				err = avcc.Unmarshal(payload)
 				if err != nil {
 					return err
+				}
+
+				// Prepend SPS/PPS to IDR frames to signal source change to downstream handlers
+				// (e.g., when transitioning from online to offline in alwaysAvailable mode)
+				h264Codec := track.Codec.(*mcodecs.H264)
+				for _, nalu := range avcc {
+					if h264.NALUType(nalu[0]&0x1F) == h264.NALUTypeIDR {
+						// Prepend SPS and PPS before the IDR
+						avcc = append([][]byte{h264Codec.SPS, h264Codec.PPS}, avcc...)
+						break
+					}
 				}
 
 				t.subStream.WriteUnit(t.media, t.format, &unit.Unit{

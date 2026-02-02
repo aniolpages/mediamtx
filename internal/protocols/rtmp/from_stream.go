@@ -2,6 +2,7 @@
 package rtmp
 
 import (
+	"bytes"
 	"errors"
 	"net"
 	"slices"
@@ -153,16 +154,16 @@ func FromStream(
 
 			case *format.H264:
 				sps, pps := forma.SafeParams()
+				codec := &codecs.H264{
+					SPS: sps,
+					PPS: pps,
+				}
 				track := &gortmplib.Track{
-					Codec: &codecs.H264{
-						SPS: sps,
-						PPS: pps,
-					},
+					Codec: codec,
 				}
 				tracks = append(tracks, track)
 
 				var videoDTSExtractor *h264.DTSExtractor
-				var lastPTS int64
 
 				r.OnData(
 					media,
@@ -175,9 +176,23 @@ func FromStream(
 						idrPresent := false
 						nonIDRPresent := false
 
+						// Check for SPS/PPS which indicates a source change
+						// (e.g., transition between online and offline in alwaysAvailable mode)
 						for _, nalu := range u.Payload.(unit.PayloadH264) {
 							typ := h264.NALUType(nalu[0] & 0x1F)
 							switch typ {
+							case h264.NALUTypeSPS:
+								if !bytes.Equal(codec.SPS, nalu) {
+									codec.SPS = nalu
+									videoDTSExtractor = nil
+								}
+
+							case h264.NALUTypePPS:
+								if !bytes.Equal(codec.PPS, nalu) {
+									codec.PPS = nalu
+									videoDTSExtractor = nil
+								}
+
 							case h264.NALUTypeIDR:
 								idrPresent = true
 
@@ -185,17 +200,6 @@ func FromStream(
 								nonIDRPresent = true
 							}
 						}
-
-						// Detect large PTS jump which indicates source change
-						if videoDTSExtractor != nil && lastPTS != 0 {
-							ptsDiff := u.PTS - lastPTS
-							// If PTS jumps more than 5 seconds or goes backwards significantly, reset
-							if ptsDiff > 450000 || ptsDiff < -90000 { // 5s forward or 1s backward at 90kHz
-								videoDTSExtractor = nil
-							}
-						}
-
-						lastPTS = u.PTS
 
 						// wait until we receive an IDR
 						if videoDTSExtractor == nil {
