@@ -2,6 +2,7 @@ package mpegts
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"slices"
 	"time"
@@ -67,8 +68,10 @@ func FromStream(
 							return nil
 						}
 
+						randomAccess := h265.IsRandomAccess(u.Payload.(unit.PayloadH265))
+
 						if dtsExtractor == nil {
-							if !h265.IsRandomAccess(u.Payload.(unit.PayloadH265)) {
+							if !randomAccess {
 								return nil
 							}
 							dtsExtractor = &h265.DTSExtractor{}
@@ -93,9 +96,12 @@ func FromStream(
 					})
 
 			case *format.H264: //nolint:dupl
-				track := &mcmpegts.Track{Codec: &tscodecs.H264{}}
+				codec := &tscodecs.H264{}
+				track := &mcmpegts.Track{Codec: codec}
 
 				var dtsExtractor *h264.DTSExtractor
+				var lastSPS []byte
+				var lastPPS []byte
 
 				addTrack(
 					media,
@@ -106,7 +112,29 @@ func FromStream(
 							return nil
 						}
 
-						idrPresent := h264.IsRandomAccess(u.Payload.(unit.PayloadH264))
+						idrPresent := false
+
+						// Check for SPS/PPS which indicates a source change
+						// (e.g., transition between online and offline in alwaysAvailable mode)
+						for _, nalu := range u.Payload.(unit.PayloadH264) {
+							typ := h264.NALUType(nalu[0] & 0x1F)
+							switch typ {
+							case h264.NALUTypeSPS:
+								if !bytes.Equal(lastSPS, nalu) {
+									lastSPS = nalu
+									dtsExtractor = nil
+								}
+
+							case h264.NALUTypePPS:
+								if !bytes.Equal(lastPPS, nalu) {
+									lastPPS = nalu
+									dtsExtractor = nil
+								}
+
+							case h264.NALUTypeIDR:
+								idrPresent = true
+							}
+						}
 
 						if dtsExtractor == nil {
 							if !idrPresent {

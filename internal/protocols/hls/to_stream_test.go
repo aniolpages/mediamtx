@@ -86,6 +86,7 @@ func TestToStream(t *testing.T) {
 	defer s.Shutdown(context.Background())
 
 	var strm *stream.Stream
+	var subStream *stream.SubStream
 	done := make(chan struct{})
 
 	r := &stream.Reader{Parent: test.NilLogger}
@@ -96,7 +97,7 @@ func TestToStream(t *testing.T) {
 		OnTracks: func(tracks []*gohlslib.Track) error {
 			medias, err2 := ToStream(c, tracks, &conf.Path{
 				UseAbsoluteTimestamp: true,
-			}, &strm)
+			}, &subStream)
 			require.NoError(t, err2)
 
 			require.Equal(t, []*description.Media{{
@@ -108,21 +109,37 @@ func TestToStream(t *testing.T) {
 			}}, medias)
 
 			strm = &stream.Stream{
-				WriteQueueSize:     512,
-				RTPMaxPayloadSize:  1450,
-				Desc:               &description.Session{Medias: medias},
-				GenerateRTPPackets: true,
-				Parent:             test.NilLogger,
+				Desc:              &description.Session{Medias: medias},
+				WriteQueueSize:    512,
+				RTPMaxPayloadSize: 1450,
+				Parent:            test.NilLogger,
 			}
 			err2 = strm.Initialize()
 			require.NoError(t, err2)
+
+			subStream = &stream.SubStream{
+				Stream:        strm,
+				UseRTPPackets: false,
+			}
+			err2 = subStream.Initialize()
+			require.NoError(t, err2)
+
+			n := 0
 
 			r.OnData(
 				medias[0],
 				medias[0].Formats[0],
 				func(u *unit.Unit) error {
-					require.Equal(t, time.Date(2018, 0o5, 20, 8, 17, 15, 0, time.UTC), u.NTP)
-					close(done)
+					switch n {
+					case 0:
+						require.True(t, u.NilPayload())
+					case 1:
+						require.Equal(t, time.Date(2018, 0o5, 20, 8, 17, 15, 0, time.UTC), u.NTP)
+						close(done)
+					default:
+						t.Error("should not happen")
+					}
+					n++
 					return nil
 				})
 

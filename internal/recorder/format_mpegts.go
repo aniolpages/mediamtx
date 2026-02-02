@@ -129,6 +129,8 @@ func (f *formatMPEGTS) initialize() bool {
 				track := addTrack(&tscodecs.H264{})
 
 				var dtsExtractor *h264.DTSExtractor
+				var lastSPS []byte
+				var lastPPS []byte
 
 				f.ri.reader.OnData(
 					media,
@@ -138,7 +140,29 @@ func (f *formatMPEGTS) initialize() bool {
 							return nil
 						}
 
-						randomAccess := h264.IsRandomAccess(u.Payload.(unit.PayloadH264))
+						randomAccess := false
+
+						// Check for SPS/PPS which indicates a source change
+						// (e.g., transition between online and offline in alwaysAvailable mode)
+						for _, nalu := range u.Payload.(unit.PayloadH264) {
+							typ := h264.NALUType(nalu[0] & 0x1F)
+							switch typ {
+							case h264.NALUTypeSPS:
+								if !bytes.Equal(lastSPS, nalu) {
+									lastSPS = nalu
+									dtsExtractor = nil
+								}
+
+							case h264.NALUTypePPS:
+								if !bytes.Equal(lastPPS, nalu) {
+									lastPPS = nalu
+									dtsExtractor = nil
+								}
+
+							case h264.NALUTypeIDR:
+								randomAccess = true
+							}
+						}
 
 						if dtsExtractor == nil {
 							if !randomAccess {

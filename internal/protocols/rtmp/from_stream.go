@@ -2,6 +2,7 @@
 package rtmp
 
 import (
+	"bytes"
 	"errors"
 	"net"
 	"slices"
@@ -119,6 +120,16 @@ func FromStream(
 								return nil
 							}
 
+							// Check for SPS/VPS which indicates a source change
+							// (e.g., transition between online and offline in alwaysAvailable mode)
+							for _, nalu := range u.Payload.(unit.PayloadH265) {
+								typ := h265.NALUType((nalu[0] >> 1) & 0b111111)
+								if typ == h265.NALUType_SPS_NUT || typ == h265.NALUType_VPS_NUT {
+									videoDTSExtractor = nil
+									break
+								}
+							}
+
 							if videoDTSExtractor == nil {
 								if !h265.IsRandomAccess(u.Payload.(unit.PayloadH265)) {
 									return nil
@@ -143,11 +154,12 @@ func FromStream(
 
 			case *format.H264:
 				sps, pps := forma.SafeParams()
+				codec := &codecs.H264{
+					SPS: sps,
+					PPS: pps,
+				}
 				track := &gortmplib.Track{
-					Codec: &codecs.H264{
-						SPS: sps,
-						PPS: pps,
-					},
+					Codec: codec,
 				}
 				tracks = append(tracks, track)
 
@@ -164,9 +176,23 @@ func FromStream(
 						idrPresent := false
 						nonIDRPresent := false
 
+						// Check for SPS/PPS which indicates a source change
+						// (e.g., transition between online and offline in alwaysAvailable mode)
 						for _, nalu := range u.Payload.(unit.PayloadH264) {
 							typ := h264.NALUType(nalu[0] & 0x1F)
 							switch typ {
+							case h264.NALUTypeSPS:
+								if !bytes.Equal(codec.SPS, nalu) {
+									codec.SPS = nalu
+									videoDTSExtractor = nil
+								}
+
+							case h264.NALUTypePPS:
+								if !bytes.Equal(codec.PPS, nalu) {
+									codec.PPS = nalu
+									videoDTSExtractor = nil
+								}
+
 							case h264.NALUTypeIDR:
 								idrPresent = true
 
@@ -382,7 +408,6 @@ func FromStream(
 					track := &gortmplib.Track{
 						Codec: &codecs.G711{
 							MULaw:        forma.MULaw,
-							SampleRate:   forma.SampleRate,
 							ChannelCount: forma.ChannelCount,
 						},
 					}

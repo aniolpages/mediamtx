@@ -185,13 +185,20 @@ func TestServerRead(t *testing.T) {
 			}}
 
 			strm := &stream.Stream{
-				WriteQueueSize:     512,
-				RTPMaxPayloadSize:  1450,
-				Desc:               desc,
-				GenerateRTPPackets: true,
-				Parent:             test.NilLogger,
+				Desc:              desc,
+				WriteQueueSize:    512,
+				RTPMaxPayloadSize: 1450,
+				ReplaceNTP:        false,
+				Parent:            test.NilLogger,
 			}
 			err := strm.Initialize()
+			require.NoError(t, err)
+
+			subStream := &stream.SubStream{
+				Stream:        strm,
+				UseRTPPackets: false,
+			}
+			err = subStream.Initialize()
 			require.NoError(t, err)
 
 			pm := &dummyPathManager{
@@ -234,7 +241,8 @@ func TestServerRead(t *testing.T) {
 				defer s.Close()
 
 				c := &gohlslib.Client{
-					URI: "http://myuser:mypass@127.0.0.1:8888/teststream/index.m3u8?param=value",
+					URI:           "http://myuser:mypass@127.0.0.1:8888/teststream/index.m3u8?param=value",
+					StartDistance: 1,
 				}
 
 				recv1 := make(chan struct{})
@@ -249,9 +257,10 @@ func TestServerRead(t *testing.T) {
 						{
 							Codec: &codecs.MPEG4Audio{
 								Config: mpeg4audio.AudioSpecificConfig{
-									Type:         2,
-									ChannelCount: 2,
-									SampleRate:   44100,
+									Type:          2,
+									ChannelCount:  2,
+									ChannelConfig: 2,
+									SampleRate:    44100,
 								},
 							},
 							ClockRate: 90000,
@@ -282,17 +291,17 @@ func TestServerRead(t *testing.T) {
 				require.NoError(t, err)
 				defer c.Close()
 
-				time.Sleep(100 * time.Millisecond)
+				strm.WaitForReaders()
 
-				for i := range 4 {
-					strm.WriteUnit(test.MediaH264, test.FormatH264, &unit.Unit{
+				for i := range 2 {
+					subStream.WriteUnit(test.MediaH264, test.FormatH264, &unit.Unit{
 						NTP: time.Time{},
 						PTS: int64(i) * 90000,
 						Payload: unit.PayloadH264{
 							{5, 1}, // IDR
 						},
 					})
-					strm.WriteUnit(test.MediaMPEG4Audio, test.FormatMPEG4Audio, &unit.Unit{
+					subStream.WriteUnit(test.MediaMPEG4Audio, test.FormatMPEG4Audio, &unit.Unit{
 						NTP:     time.Time{},
 						PTS:     int64(i) * 44100,
 						Payload: unit.PayloadMPEG4Audio{{1, 2}},
@@ -323,27 +332,26 @@ func TestServerRead(t *testing.T) {
 
 				s.PathReady(&dummyPath{})
 
-				time.Sleep(500 * time.Millisecond)
+				strm.WaitForReaders()
 
-				for i := range 4 {
-					strm.WriteUnit(test.MediaH264, test.FormatH264, &unit.Unit{
+				for i := range 2 {
+					subStream.WriteUnit(test.MediaH264, test.FormatH264, &unit.Unit{
 						NTP: time.Time{},
 						PTS: int64(i) * 90000,
 						Payload: unit.PayloadH264{
 							{5, 1}, // IDR
 						},
 					})
-					strm.WriteUnit(test.MediaMPEG4Audio, test.FormatMPEG4Audio, &unit.Unit{
+					subStream.WriteUnit(test.MediaMPEG4Audio, test.FormatMPEG4Audio, &unit.Unit{
 						NTP:     time.Time{},
 						PTS:     int64(i) * 44100,
 						Payload: unit.PayloadMPEG4Audio{{1, 2}},
 					})
 				}
 
-				time.Sleep(100 * time.Millisecond)
-
 				c := &gohlslib.Client{
-					URI: "http://myuser:mypass@127.0.0.1:8888/teststream/index.m3u8?param=value",
+					URI:           "http://myuser:mypass@127.0.0.1:8888/teststream/index.m3u8?param=value",
+					StartDistance: 1,
 				}
 
 				recv1 := make(chan struct{})
@@ -358,9 +366,10 @@ func TestServerRead(t *testing.T) {
 						{
 							Codec: &codecs.MPEG4Audio{
 								Config: mpeg4audio.AudioSpecificConfig{
-									Type:         2,
-									ChannelCount: 2,
-									SampleRate:   44100,
+									Type:          2,
+									ChannelCount:  2,
+									ChannelConfig: 2,
+									SampleRate:    44100,
 								},
 							},
 							ClockRate: 90000,
@@ -406,13 +415,19 @@ func TestServerDirectory(t *testing.T) {
 	desc := &description.Session{Medias: []*description.Media{test.MediaH264}}
 
 	strm := &stream.Stream{
-		WriteQueueSize:     512,
-		RTPMaxPayloadSize:  1450,
-		Desc:               desc,
-		GenerateRTPPackets: true,
-		Parent:             test.NilLogger,
+		Desc:              desc,
+		WriteQueueSize:    512,
+		RTPMaxPayloadSize: 1450,
+		Parent:            test.NilLogger,
 	}
 	err = strm.Initialize()
+	require.NoError(t, err)
+
+	subStream := &stream.SubStream{
+		Stream:        strm,
+		UseRTPPackets: false,
+	}
+	err = subStream.Initialize()
 	require.NoError(t, err)
 
 	pm := &dummyPathManager{
@@ -455,13 +470,19 @@ func TestServerDynamicAlwaysRemux(t *testing.T) {
 	desc := &description.Session{Medias: []*description.Media{test.MediaH264}}
 
 	strm := &stream.Stream{
-		WriteQueueSize:     512,
-		RTPMaxPayloadSize:  1450,
-		Desc:               desc,
-		GenerateRTPPackets: true,
-		Parent:             test.NilLogger,
+		Desc:              desc,
+		WriteQueueSize:    512,
+		RTPMaxPayloadSize: 1450,
+		Parent:            test.NilLogger,
 	}
 	err := strm.Initialize()
+	require.NoError(t, err)
+
+	subStream := &stream.SubStream{
+		Stream:        strm,
+		UseRTPPackets: false,
+	}
+	err = subStream.Initialize()
 	require.NoError(t, err)
 
 	done := make(chan struct{})
