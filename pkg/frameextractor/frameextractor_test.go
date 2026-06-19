@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 
+	hi264encode "github.com/Eyevinn/hi264/pkg/encode"
+	hi264yuv "github.com/Eyevinn/hi264/pkg/yuv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -66,6 +68,73 @@ func TestDecodeVP8(t *testing.T) {
 	require.Equal(t, image.Rect(0, 0, 150, 100), img.Bounds())
 }
 
+func TestDecodeH264AccessUnit(t *testing.T) {
+	img, err := DecodeH264AccessUnit(testH264AccessUnit(t))
+	require.NoError(t, err)
+	require.Equal(t, image.Rect(0, 0, 16, 16), img.Bounds())
+}
+
+func TestSnapshotH264AccessUnitJPEG(t *testing.T) {
+	out, contentType, err := SnapshotH264AccessUnit(testH264AccessUnit(t), Options{})
+	require.NoError(t, err)
+	require.Equal(t, "image/jpeg", contentType)
+
+	cfg, err := jpeg.DecodeConfig(bytes.NewReader(out))
+	require.NoError(t, err)
+	require.Equal(t, 16, cfg.Width)
+	require.Equal(t, 16, cfg.Height)
+}
+
+func TestSnapshotH264AccessUnitResizePNG(t *testing.T) {
+	out, contentType, err := SnapshotH264AccessUnit(testH264AccessUnit(t), Options{
+		Format: FormatPNG,
+		Width:  8,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "image/png", contentType)
+
+	cfg, err := png.DecodeConfig(bytes.NewReader(out))
+	require.NoError(t, err)
+	require.Equal(t, 8, cfg.Width)
+	require.Equal(t, 8, cfg.Height)
+}
+
+func TestSnapshotH264AnnexB(t *testing.T) {
+	annexB := NALUsToAnnexB(testH264AccessUnit(t))
+
+	out, contentType, err := Snapshot(CodecH264, annexB, Options{})
+	require.NoError(t, err)
+	require.Equal(t, "image/jpeg", contentType)
+
+	cfg, err := jpeg.DecodeConfig(bytes.NewReader(out))
+	require.NoError(t, err)
+	require.Equal(t, 16, cfg.Width)
+	require.Equal(t, 16, cfg.Height)
+}
+
+func TestH264DecoderKeepsParameterSets(t *testing.T) {
+	params, idr := splitH264AccessUnit(t, testH264AccessUnit(t))
+
+	var dec H264Decoder
+	require.NoError(t, dec.Init())
+
+	_, err := dec.Decode(params)
+	require.ErrorIs(t, err, ErrNoKeyFrame)
+
+	img, err := dec.Decode(idr)
+	require.NoError(t, err)
+	require.Equal(t, image.Rect(0, 0, 16, 16), img.Bounds())
+
+	out, contentType, err := dec.Snapshot(idr, Options{Format: FormatPNG})
+	require.NoError(t, err)
+	require.Equal(t, "image/png", contentType)
+
+	cfg, err := png.DecodeConfig(bytes.NewReader(out))
+	require.NoError(t, err)
+	require.Equal(t, 16, cfg.Width)
+	require.Equal(t, 16, cfg.Height)
+}
+
 func TestH264H265RandomAccessHelpers(t *testing.T) {
 	require.False(t, H264AccessUnitIsRandomAccess(AccessUnit{{0x01}}))
 	require.True(t, H264AccessUnitIsRandomAccess(AccessUnit{{0x67}, {0x68}, {0x65}}))
@@ -109,10 +178,57 @@ func TestNALUsToAnnexB(t *testing.T) {
 		NALUsToAnnexB(AccessUnit{{0x65, 0x01}, {0x41, 0x02}}))
 }
 
-func TestUnsupportedH264Decode(t *testing.T) {
-	_, err := DecodeH264AccessUnit(AccessUnit{{0x65}})
+func TestUnsupportedH265Decode(t *testing.T) {
+	_, err := DecodeH265AccessUnit(AccessUnit{{0x26, 0x01}})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrUnsupportedCodec))
+}
+
+func testH264AccessUnit(t *testing.T) AccessUnit {
+	t.Helper()
+
+	grid, err := hi264yuv.ParseGrid("x")
+	require.NoError(t, err)
+
+	enc := &hi264encode.FrameEncoder{
+		Grid: grid,
+		Colors: hi264yuv.ColorMap{
+			'x': {Y: 128, Cb: 128, Cr: 128},
+		},
+		QP: 26,
+	}
+
+	annexB, err := enc.Encode()
+	require.NoError(t, err)
+
+	nalus, err := AnnexBToNALUs(annexB)
+	require.NoError(t, err)
+
+	return nalus
+}
+
+func splitH264AccessUnit(t *testing.T, au AccessUnit) (AccessUnit, AccessUnit) {
+	t.Helper()
+
+	var params AccessUnit
+	var idr AccessUnit
+
+	for _, nalu := range au {
+		require.NotEmpty(t, nalu)
+
+		switch nalu[0] & 0x1F {
+		case 7, 8:
+			params = append(params, nalu)
+
+		case 5:
+			idr = append(idr, nalu)
+		}
+	}
+
+	require.NotEmpty(t, params)
+	require.NotEmpty(t, idr)
+
+	return params, idr
 }
 
 func testVP8Payload(t *testing.T) []byte {

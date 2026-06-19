@@ -182,7 +182,7 @@ func Decode(codec Codec, payload []byte) (image.Image, error) {
 		return DecodeVP8(payload)
 
 	case CodecH264:
-		return nil, fmt.Errorf("%w: H.264 pixel reconstruction is not implemented", ErrUnsupportedCodec)
+		return DecodeH264AnnexB(payload)
 
 	case CodecH265:
 		return nil, fmt.Errorf("%w: H.265 pixel reconstruction is not implemented", ErrUnsupportedCodec)
@@ -221,12 +221,6 @@ func DecodeVP8(payload []byte) (image.Image, error) {
 	return d.DecodeFrame()
 }
 
-// DecodeH264AccessUnit documents the intended H.264 integration point.
-func DecodeH264AccessUnit(_ [][]byte) (image.Image, error) {
-	return nil, fmt.Errorf("%w: H.264 access unit parsing is available, pixel reconstruction is not implemented",
-		ErrUnsupportedCodec)
-}
-
 // DecodeH265AccessUnit documents the intended H.265 integration point.
 func DecodeH265AccessUnit(_ [][]byte) (image.Image, error) {
 	return nil, fmt.Errorf("%w: H.265 access unit parsing is available, pixel reconstruction is not implemented",
@@ -236,8 +230,8 @@ func DecodeH265AccessUnit(_ [][]byte) (image.Image, error) {
 // ExtractKeyFrame returns a copy of au when it is independently decodable.
 //
 // For H.264 this means an IDR access unit. For H.265 this means an IRAP access
-// unit. The returned data is still compressed video; callers still need a video
-// decoder to turn it into pixels.
+// unit. The returned data is still compressed video; use DecodeH264AccessUnit
+// or SnapshotH264AccessUnit to turn an H.264 keyframe into pixels.
 func ExtractKeyFrame(codec Codec, au AccessUnit) (AccessUnit, error) {
 	switch codec {
 	case CodecH264:
