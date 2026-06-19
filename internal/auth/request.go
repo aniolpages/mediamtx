@@ -12,12 +12,13 @@ type Protocol string
 
 // protocols.
 const (
-	ProtocolRTSP   Protocol = "rtsp"
-	ProtocolRTMP   Protocol = "rtmp"
-	ProtocolHLS    Protocol = "hls"
-	ProtocolWebRTC Protocol = "webrtc"
-	ProtocolSRT    Protocol = "srt"
-	ProtocolMoQ    Protocol = "moq"
+	ProtocolRTSP     Protocol = "rtsp"
+	ProtocolRTMP     Protocol = "rtmp"
+	ProtocolHLS      Protocol = "hls"
+	ProtocolSnapshot Protocol = "snapshot"
+	ProtocolWebRTC   Protocol = "webrtc"
+	ProtocolSRT      Protocol = "srt"
+	ProtocolMoQ      Protocol = "moq"
 )
 
 // Request is an authentication request.

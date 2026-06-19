@@ -240,6 +240,32 @@ playbackAllowOrigins: ["*"]
 playbackTrustedProxies: []
 
 ###############################################
+# Global settings -> Snapshots server
+
+# Enable the snapshots server, which allows to extract still images from streams.
+snapshots: false
+# Address of the TCP/HTTP listener.
+snapshotsAddress: :9995
+# Enable HTTPS.
+snapshotsEncryption: false
+# Path to the server key. This is needed only when encryption is yes.
+# This can be generated with:
+# openssl genrsa -out server.key 2048
+# openssl req -new -x509 -sha256 -key server.key -out server.crt -days 3650
+snapshotsServerKey: server.key
+# Path to the server certificate.
+snapshotsServerCert: server.crt
+# Allowed CORS origins.
+# Supports wildcards: ['http://*.example.com']
+snapshotsAllowOrigins: ["*"]
+# IPs or CIDRs of proxies placed before the HTTP server.
+# These proxies can use the X-Forwarded-For header to set the real IP of clients,
+# and the X-Forwarded-Proto header to set the original protocol.
+snapshotsTrustedProxies: []
+# Maximum time to wait for a decodable key frame.
+snapshotsTimeout: 10s
+
+###############################################
 # Global settings -> RTSP server
 
 # Enable the RTSP server, which allows to publish and read streams with the RTSP protocol.

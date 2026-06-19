@@ -26,7 +26,7 @@ const (
 )
 
 func isHTTP(req *Request) bool {
-	return req.Protocol == ProtocolHLS || req.Protocol == ProtocolWebRTC ||
+	return req.Protocol == ProtocolHLS || req.Protocol == ProtocolSnapshot || req.Protocol == ProtocolWebRTC ||
 		req.Action == conf.AuthActionPlayback ||
 		req.Action == conf.AuthActionAPI ||
 		req.Action == conf.AuthActionMetrics ||

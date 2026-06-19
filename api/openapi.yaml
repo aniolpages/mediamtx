@@ -382,6 +382,28 @@ components:
           items:
             type: string
 
+        # Snapshots server
+        snapshots:
+          type: boolean
+        snapshotsAddress:
+          type: string
+        snapshotsEncryption:
+          type: boolean
+        snapshotsServerKey:
+          type: string
+        snapshotsServerCert:
+          type: string
+        snapshotsAllowOrigins:
+          type: array
+          items:
+            type: string
+        snapshotsTrustedProxies:
+          type: array
+          items:
+            type: string
+        snapshotsTimeout:
+          type: string
+
         # RTSP server
         rtsp:
           type: boolean

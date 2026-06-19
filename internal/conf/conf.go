@@ -311,6 +311,16 @@ type Conf struct {
 	PlaybackAllowOrigins   []string   `json:"playbackAllowOrigins"`
 	PlaybackTrustedProxies IPNetworks `json:"playbackTrustedProxies"`
 
+	// Snapshots
+	Snapshots               bool       `json:"snapshots"`
+	SnapshotsAddress        string     `json:"snapshotsAddress"`
+	SnapshotsEncryption     bool       `json:"snapshotsEncryption"`
+	SnapshotsServerKey      string     `json:"snapshotsServerKey"`
+	SnapshotsServerCert     string     `json:"snapshotsServerCert"`
+	SnapshotsAllowOrigins   []string   `json:"snapshotsAllowOrigins"`
+	SnapshotsTrustedProxies IPNetworks `json:"snapshotsTrustedProxies"`
+	SnapshotsTimeout        Duration   `json:"snapshotsTimeout"`
+
 	// RTSP server
 	RTSP                  bool             `json:"rtsp"`
 	RTSPDisable           *bool            `json:"rtspDisable,omitempty" deprecated:"true"`
@@ -474,6 +484,13 @@ func (conf *Conf) setDefaults() {
 	conf.PlaybackServerKey = "server.key"
 	conf.PlaybackServerCert = "server.crt"
 	conf.PlaybackAllowOrigins = []string{"*"}
+
+	// Snapshots server
+	conf.SnapshotsAddress = ":9995"
+	conf.SnapshotsServerKey = "server.key"
+	conf.SnapshotsServerCert = "server.crt"
+	conf.SnapshotsAllowOrigins = []string{"*"}
+	conf.SnapshotsTimeout = 10 * Duration(time.Second)
 
 	// RTSP server
 	conf.RTSP = true
@@ -808,6 +825,17 @@ func (conf *Conf) Validate(l logger.Writer) error {
 	if conf.Playback {
 		if conf.PlaybackAddress == "" {
 			return fmt.Errorf("'playbackAddress' must be set when playback is enabled")
+		}
+	}
+
+	// Snapshots
+
+	if conf.Snapshots {
+		if conf.SnapshotsAddress == "" {
+			return fmt.Errorf("'snapshotsAddress' must be set when snapshots are enabled")
+		}
+		if conf.SnapshotsTimeout <= 0 {
+			return fmt.Errorf("'snapshotsTimeout' must be greater than zero")
 		}
 	}
 

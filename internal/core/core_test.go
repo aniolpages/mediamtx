@@ -49,6 +49,11 @@ func TestCoreErrors(t *testing.T) {
 				"playbackAddress: invalid\n",
 		},
 		{
+			"snapshots",
+			"snapshots: yes\n" +
+				"snapshotsAddress: invalid\n",
+		},
+		{
 			"rtsp",
 			"rtspAddress: invalid\n",
 		},

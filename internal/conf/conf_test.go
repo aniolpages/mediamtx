@@ -771,6 +771,12 @@ func TestConfErrors(t *testing.T) {
 			"'playbackAddress' must be set when playback is enabled",
 		},
 		{
+			"missing snapshotsAddress with snapshots enabled",
+			"snapshots: yes\n" +
+				"snapshotsAddress: ''\n",
+			"'snapshotsAddress' must be set when snapshots are enabled",
+		},
+		{
 			"alwaysAvailableTracks and alwaysAvailableFile together",
 			"paths:\n" +
 				"  mypath:\n" +

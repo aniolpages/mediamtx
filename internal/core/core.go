@@ -34,6 +34,7 @@ import (
 	"github.com/bluenviron/mediamtx/internal/servers/moq"
 	"github.com/bluenviron/mediamtx/internal/servers/rtmp"
 	"github.com/bluenviron/mediamtx/internal/servers/rtsp"
+	"github.com/bluenviron/mediamtx/internal/servers/snapshot"
 	"github.com/bluenviron/mediamtx/internal/servers/srt"
 	"github.com/bluenviron/mediamtx/internal/servers/webrtc"
 	"github.com/bluenviron/mediamtx/internal/upgrade"
@@ -123,6 +124,7 @@ type Core struct {
 	rtspsServer     *rtsp.Server
 	rtmpServer      *rtmp.Server
 	rtmpsServer     *rtmp.Server
+	snapshotServer  *snapshot.Server
 	hlsServer       *hls.Server
 	webRTCServer    *webrtc.Server
 	srtServer       *srt.Server
@@ -462,6 +464,30 @@ func (p *Core) createResources(initial bool) error {
 			parent:            p,
 		}
 		p.pathManager.initialize()
+	}
+
+	if p.conf.Snapshots &&
+		p.snapshotServer == nil {
+		i := &snapshot.Server{
+			Address:         p.conf.SnapshotsAddress,
+			DumpPackets:     p.conf.DumpPackets,
+			Encryption:      p.conf.SnapshotsEncryption,
+			ServerKey:       p.conf.SnapshotsServerKey,
+			ServerCert:      p.conf.SnapshotsServerCert,
+			AllowOrigins:    p.conf.SnapshotsAllowOrigins,
+			TrustedProxies:  p.conf.SnapshotsTrustedProxies,
+			ReadTimeout:     p.conf.ReadTimeout,
+			WriteTimeout:    p.conf.WriteTimeout,
+			SnapshotTimeout: p.conf.SnapshotsTimeout,
+			ExternalCmdPool: p.externalCmdPool,
+			PathManager:     p.pathManager,
+			Parent:          p,
+		}
+		err = i.Initialize()
+		if err != nil {
+			return err
+		}
+		p.snapshotServer = i
 	}
 
 	if p.conf.RTSP &&
@@ -863,6 +889,22 @@ func (p *Core) closeResources(newConf *conf.Conf, calledByAPI bool) {
 		p.pathManager.ReloadPathConfs(newConf.Paths)
 	}
 
+	closeSnapshotServer := newConf == nil ||
+		newConf.Snapshots != p.conf.Snapshots ||
+		newConf.SnapshotsAddress != p.conf.SnapshotsAddress ||
+		newConf.SnapshotsEncryption != p.conf.SnapshotsEncryption ||
+		newConf.SnapshotsServerKey != p.conf.SnapshotsServerKey ||
+		newConf.SnapshotsServerCert != p.conf.SnapshotsServerCert ||
+		!slices.Equal(newConf.SnapshotsAllowOrigins, p.conf.SnapshotsAllowOrigins) ||
+		!reflect.DeepEqual(newConf.SnapshotsTrustedProxies, p.conf.SnapshotsTrustedProxies) ||
+		newConf.SnapshotsTimeout != p.conf.SnapshotsTimeout ||
+		newConf.ReadTimeout != p.conf.ReadTimeout ||
+		newConf.WriteTimeout != p.conf.WriteTimeout ||
+		newConf.DumpPackets != p.conf.DumpPackets ||
+		closeAuthManager ||
+		closePathManager ||
+		closeLogger
+
 	closeRTSPServer := newConf == nil ||
 		newConf.RTSP != p.conf.RTSP ||
 		newConf.RTSPEncryption != p.conf.RTSPEncryption ||
@@ -1040,6 +1082,7 @@ func (p *Core) closeResources(newConf *conf.Conf, calledByAPI bool) {
 		closeRTSPSServer ||
 		closeRTMPServer ||
 		closeRTMPSServer ||
+		closeSnapshotServer ||
 		closeHLSServer ||
 		closeWebRTCServer ||
 		closeSRTServer ||
@@ -1098,6 +1141,11 @@ func (p *Core) closeResources(newConf *conf.Conf, calledByAPI bool) {
 	if closeRTSPServer && p.rtspServer != nil {
 		p.rtspServer.Close()
 		p.rtspServer = nil
+	}
+
+	if closeSnapshotServer && p.snapshotServer != nil {
+		p.snapshotServer.Close()
+		p.snapshotServer = nil
 	}
 
 	if closePathManager && p.pathManager != nil {

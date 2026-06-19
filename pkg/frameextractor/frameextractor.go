@@ -143,6 +143,11 @@ func (o Options) validates() error {
 	return nil
 }
 
+// Validate checks whether options are valid.
+func (o Options) Validate() error {
+	return o.validates()
+}
+
 func (o Options) canPassThroughJPEG() bool {
 	return (o.Format == "" || o.Format == FormatJPEG) &&
 		o.Quality == 0 &&
